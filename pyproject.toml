@@ -1,0 +1,40 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "spectral-workbench"
+version = "0.1.0"
+description = "Real-time audio filtering and spectral analysis tool"
+authors = [{name = "Anastasios Chatzigiannakis"}]
+readme = "../README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+]
+
+dependencies = [
+    "numpy>=1.24.0",
+    "PyQt6>=6.6.0",
+    "pyqtgraph>=0.13.0",
+    "scipy>=1.11.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=23.0",
+    "mypy>=1.0",
+]
+
+[tool.maturin]
+python-source = "python"
+module-name = "spectral_workbench._core"
+features = ["pyo3/extension-module"]
+
+[project.scripts]
+spectral-workbench = "spectral_workbench.main:main"

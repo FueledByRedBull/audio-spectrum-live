@@ -1,0 +1,23 @@
+[package]
+name = "spectral-workbench-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[lib]
+name = "spectral_workbench"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cpal = { workspace = true }
+rustfft = { workspace = true }
+realfft = { workspace = true }
+ndarray = { workspace = true }
+pyo3 = { workspace = true }
+numpy = { workspace = true }
+num-complex = { workspace = true }
+ringbuf = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+criterion = "0.5"

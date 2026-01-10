@@ -1,0 +1,49 @@
+# Spectral Workbench
+*.pyc
+__pycache__/
+*.so
+*.dll
+*.dylib
+*.pyd
+
+# Rust
+/target/
+/rust-core/target/
+**/*.rs.bk
+Cargo.lock
+
+# Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+*.egg
+.Python
+env/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+/wheels/
+*.whl
+
+# Documentation (keep only README.md)
+QUICKSTART.md
+PROJECT_OVERVIEW.md
+IMPLEMENTATION_SUMMARY.md
+PERFORMANCE_OPTIMIZATIONS.md
+plan.md
+
+# Python GUI package (source code stays)
+# Installed module conflicts handled by package rename
