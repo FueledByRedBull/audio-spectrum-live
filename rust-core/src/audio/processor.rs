@@ -4,7 +4,8 @@
 
 use crate::filters::{FirFilter, FastFirFilter, FilterSpec, WindowType, design_bandpass_fir};
 use crate::spectrum::{SpectrumAnalyzer, analysis::AnalyzerConfig};
-use crate::audio::{AudioInput, AudioRingBuffer, input::list_input_devices};
+use crate::audio::{AudioInput, AudioOutput, AudioRingBuffer, input::list_input_devices};
+use crate::audio::buffer::AudioProducer;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -44,6 +45,12 @@ pub struct AudioProcessor {
     /// Audio input stream
     audio_input: Option<AudioInput>,
     
+    /// Audio output stream (for monitoring)
+    audio_output: Option<AudioOutput>,
+    
+    /// Output ring buffer producer (for sending audio to output)
+    output_producer: Arc<Mutex<Option<AudioProducer>>>,
+    
     /// Processing thread handle
     process_thread: Option<std::thread::JoinHandle<()>>,
     
@@ -52,6 +59,9 @@ pub struct AudioProcessor {
     
     /// Bypass flag
     bypass: Arc<AtomicBool>,
+    
+    /// Monitoring enabled flag
+    monitoring: Arc<AtomicBool>,
     
     /// Sample rate
     sample_rate: f64,
@@ -100,9 +110,12 @@ impl AudioProcessor {
             analyzer: Arc::new(Mutex::new(SpectrumAnalyzer::new(analyzer_config))),
             results: Arc::new(Mutex::new(None)),
             audio_input: None,
+            audio_output: None,
+            output_producer: Arc::new(Mutex::new(None)),
             process_thread: None,
             running: Arc::new(AtomicBool::new(false)),
             bypass: Arc::new(AtomicBool::new(false)),
+            monitoring: Arc::new(AtomicBool::new(false)),
             sample_rate,
         }
     }
@@ -143,6 +156,8 @@ impl AudioProcessor {
         let results = Arc::clone(&self.results);
         let running = Arc::clone(&self.running);
         let bypass = Arc::clone(&self.bypass);
+        let monitoring = Arc::clone(&self.monitoring);
+        let output_producer = Arc::clone(&self.output_producer);
         let sample_rate = self.sample_rate;
         
         let handle = std::thread::spawn(move || {
@@ -186,11 +201,20 @@ impl AudioProcessor {
                     if let Ok(mut results_guard) = results.lock() {
                         *results_guard = Some(ProcessingResults {
                             input_waveform: waveform_buffer[..n].to_vec(),
-                            filtered_waveform: filtered,
+                            filtered_waveform: filtered.clone(),
                             spectrum_magnitude: spectrum_mag,
                             spectrum_frequencies: spectrum_freq,
                             sample_rate,
                         });
+                    }
+                    
+                    // Send filtered audio to output if monitoring is enabled
+                    if monitoring.load(Ordering::SeqCst) {
+                        if let Ok(mut producer_guard) = output_producer.lock() {
+                            if let Some(producer) = producer_guard.as_mut() {
+                                producer.write(&filtered);
+                            }
+                        }
                     }
                 } else {
                     // No data available, yield to avoid busy-wait
@@ -252,6 +276,57 @@ impl AudioProcessor {
     /// Set bypass state
     pub fn set_bypass(&self, bypass: bool) {
         self.bypass.store(bypass, Ordering::SeqCst);
+    }
+    
+    /// Enable audio monitoring (output filtered audio to speakers/headphones)
+    /// 
+    /// WARNING: Use headphones to avoid feedback loop!
+    pub fn enable_monitoring(&mut self) -> Result<(), String> {
+        if self.audio_output.is_some() {
+            self.monitoring.store(true, Ordering::SeqCst);
+            return Ok(());
+        }
+        
+        // Create output ring buffer
+        let rb = AudioRingBuffer::new(96000);
+        let (producer, consumer) = rb.split();
+        
+        // Store producer for processing thread
+        if let Ok(mut producer_guard) = self.output_producer.lock() {
+            *producer_guard = Some(producer);
+        }
+        
+        // Start audio output
+        let output = AudioOutput::from_default_device(consumer)
+            .map_err(|e| format!("Failed to start audio output: {}", e))?;
+        
+        output.start().map_err(|e| format!("Failed to start output stream: {}", e))?;
+        
+        self.audio_output = Some(output);
+        self.monitoring.store(true, Ordering::SeqCst);
+        
+        Ok(())
+    }
+    
+    /// Disable audio monitoring
+    pub fn disable_monitoring(&mut self) {
+        self.monitoring.store(false, Ordering::SeqCst);
+        
+        if let Some(output) = &self.audio_output {
+            let _ = output.pause();
+        }
+        
+        self.audio_output = None;
+        
+        // Clear output producer
+        if let Ok(mut producer_guard) = self.output_producer.lock() {
+            *producer_guard = None;
+        }
+    }
+    
+    /// Check if monitoring is enabled
+    pub fn is_monitoring(&self) -> bool {
+        self.monitoring.load(Ordering::SeqCst)
     }
     
     /// Update FFT configuration

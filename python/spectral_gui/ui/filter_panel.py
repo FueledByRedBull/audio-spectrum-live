@@ -12,6 +12,8 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QGroupBox,
     QFormLayout,
+    QMessageBox,
+    QCheckBox,
 )
 from PyQt6.QtCore import Qt
 
@@ -125,6 +127,10 @@ class FilterPanel(QWidget):
         self.bypass_button.setCheckable(True)
         button_layout.addWidget(self.bypass_button)
         
+        self.monitor_checkbox = QCheckBox("Monitor Output (⚠ Use Headphones!)")
+        self.monitor_checkbox.setToolTip("Enable to hear filtered audio.\nWARNING: Use headphones to avoid feedback!")
+        button_layout.addWidget(self.monitor_checkbox)
+        
         layout.addLayout(button_layout)
         
         # Add stretch to push everything to top
@@ -141,6 +147,7 @@ class FilterPanel(QWidget):
         self.apply_button.clicked.connect(self._apply_filter)
         self.reset_button.clicked.connect(self._reset_to_part_a)
         self.bypass_button.toggled.connect(self._toggle_bypass)
+        self.monitor_checkbox.toggled.connect(self._toggle_monitoring)
         
         # Combo boxes
         self.fft_size_combo.currentTextChanged.connect(self._update_fft_size)
@@ -196,6 +203,40 @@ class FilterPanel(QWidget):
             self.bypass_button.setText("Enable Filter")
         else:
             self.bypass_button.setText("Bypass Filter")
+    
+    def _toggle_monitoring(self, checked):
+        """Toggle audio monitoring with feedback warning"""
+        if checked:
+            # Show warning dialog
+            reply = QMessageBox.warning(
+                self,
+                "⚠ Feedback Warning",
+                "Enabling monitoring will output audio to your speakers/headphones.\n\n"
+                "⚠ WARNING: If you are using laptop speakers and a built-in microphone, "
+                "this WILL create a loud feedback loop!\n\n"
+                "✓ Use headphones to avoid feedback.\n\n"
+                "Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    self.dsp_controller.enable_monitoring()
+                    print("✓ Audio monitoring enabled")
+                except Exception as e:
+                    print(f"✗ Failed to enable monitoring: {e}")
+                    QMessageBox.critical(self, "Error", f"Failed to enable monitoring:\n{e}")
+                    self.monitor_checkbox.setChecked(False)
+            else:
+                # User cancelled
+                self.monitor_checkbox.setChecked(False)
+        else:
+            try:
+                self.dsp_controller.disable_monitoring()
+                print("Audio monitoring disabled")
+            except Exception as e:
+                print(f"Error disabling monitoring: {e}")
             
     def _update_fft_size(self, size_str):
         """Update FFT size"""

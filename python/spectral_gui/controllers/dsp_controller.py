@@ -106,6 +106,22 @@ class DSPController:
         """Set filter bypass state"""
         if self.processor:
             self.processor.set_bypass(bypass)
+    
+    def enable_monitoring(self):
+        """Enable audio monitoring (output filtered audio)"""
+        if self.processor:
+            self.processor.enable_monitoring()
+    
+    def disable_monitoring(self):
+        """Disable audio monitoring"""
+        if self.processor:
+            self.processor.disable_monitoring()
+    
+    def is_monitoring(self) -> bool:
+        """Check if monitoring is enabled"""
+        if self.processor:
+            return self.processor.is_monitoring()
+        return False
         
     def set_fft_size(self, size: int):
         """Update FFT size"""

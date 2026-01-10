@@ -63,6 +63,25 @@ impl PyAudioProcessor {
         self.processor.set_bypass(bypass);
     }
     
+    /// Enable audio monitoring (WARNING: Use headphones!)
+    /// 
+    /// Outputs filtered audio to speakers/headphones.
+    /// Use headphones to avoid feedback loop!
+    fn enable_monitoring(&mut self) -> PyResult<()> {
+        self.processor.enable_monitoring()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))
+    }
+    
+    /// Disable audio monitoring
+    fn disable_monitoring(&mut self) {
+        self.processor.disable_monitoring();
+    }
+    
+    /// Check if monitoring is enabled
+    fn is_monitoring(&self) -> bool {
+        self.processor.is_monitoring()
+    }
+    
     /// Update FFT configuration
     fn update_fft_config(&self, fft_size: usize, window_type: PyWindowType) {
         self.processor.update_fft_config(fft_size, window_type.into());
