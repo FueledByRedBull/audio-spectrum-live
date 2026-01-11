@@ -1,37 +1,34 @@
-//! Noise gate with RMS envelope detection
+//! Noise gate with IIR envelope detection
 //!
 //! Reduces gain when signal level falls below threshold, useful for
 //! removing background noise during silent periods.
+//!
+//! Uses single-pole IIR filter for RMS approximation instead of sliding window,
+//! reducing memory from ~2400 samples to just 2 state variables.
 
-/// Noise gate processor
+/// Noise gate processor with IIR envelope follower
 pub struct NoiseGate {
     /// Threshold in dB (e.g., -40.0)
     threshold_db: f64,
-    
+
     /// Attack time constant (exponential smoothing coefficient)
     attack_coeff: f64,
-    
+
     /// Release time constant (exponential smoothing coefficient)
     release_coeff: f64,
-    
+
     /// Current envelope level (linear amplitude, not dB)
     envelope: f64,
-    
-    /// RMS window size in samples
-    rms_window_size: usize,
-    
-    /// Circular buffer for RMS calculation
-    rms_buffer: Vec<f64>,
-    
-    /// Current position in RMS buffer
-    rms_cursor: usize,
-    
-    /// Sum of squares for efficient RMS calculation
-    sum_of_squares: f64,
-    
+
+    /// IIR envelope squared (for RMS approximation)
+    envelope_squared: f64,
+
+    /// RMS smoothing coefficient (single-pole IIR, ~50ms time constant)
+    rms_coeff: f64,
+
     /// Sample rate
     sample_rate: f64,
-    
+
     /// Whether gate is currently open (for hysteresis)
     is_open: bool,
 }
@@ -49,19 +46,17 @@ impl NoiseGate {
         // tau = time_ms / 1000, coeff = exp(-1 / (tau * sample_rate))
         let attack_coeff = Self::time_constant_to_coeff(attack_ms, sample_rate);
         let release_coeff = Self::time_constant_to_coeff(release_ms, sample_rate);
-        
-        // RMS window: 50ms as specified
-        let rms_window_size = (0.050 * sample_rate) as usize;
-        
+
+        // RMS smoothing: 50ms time constant for IIR envelope follower
+        let rms_coeff = Self::time_constant_to_coeff(50.0, sample_rate);
+
         Self {
             threshold_db,
             attack_coeff,
             release_coeff,
             envelope: 0.0,
-            rms_window_size,
-            rms_buffer: vec![0.0; rms_window_size],
-            rms_cursor: 0,
-            sum_of_squares: 0.0,
+            envelope_squared: 0.0,
+            rms_coeff,
             sample_rate,
             is_open: false,
         }
@@ -91,27 +86,22 @@ impl NoiseGate {
     /// Process a single sample
     #[inline]
     fn process_sample(&mut self, input: f64) -> f64 {
-        // Update RMS calculation (sliding window)
-        let old_sample = self.rms_buffer[self.rms_cursor];
-        self.rms_buffer[self.rms_cursor] = input;
-        
-        // Update sum of squares
-        self.sum_of_squares -= old_sample * old_sample;
-        self.sum_of_squares += input * input;
-        
-        // Advance cursor
-        self.rms_cursor = (self.rms_cursor + 1) % self.rms_window_size;
-        
-        // Calculate RMS level
-        let rms = (self.sum_of_squares / self.rms_window_size as f64).sqrt();
-        
+        // IIR envelope follower (RMS approximation)
+        // Much more efficient than sliding window: 2 state variables vs ~2400 samples
+        let input_squared = input * input;
+        self.envelope_squared = self.rms_coeff * self.envelope_squared
+            + (1.0 - self.rms_coeff) * input_squared;
+
+        // Calculate RMS from smoothed squared envelope
+        let rms = self.envelope_squared.sqrt();
+
         // Convert to dB (with small epsilon to avoid log(0))
         let level_db = 20.0 * (rms + 1e-10).log10();
-        
+
         // Determine if gate should be open
         // Use hysteresis: different thresholds for opening and closing
-        let hysteresis_db = 3.0;  // 3 dB hysteresis
-        
+        let hysteresis_db = 3.0; // 3 dB hysteresis
+
         if self.is_open {
             // Gate is open: close if level drops below (threshold - hysteresis)
             if level_db < self.threshold_db - hysteresis_db {
@@ -123,20 +113,20 @@ impl NoiseGate {
                 self.is_open = true;
             }
         }
-        
+
         // Calculate target gain (0.0 when closed, 1.0 when open)
         let target_gain = if self.is_open { 1.0 } else { 0.0 };
-        
+
         // Smooth gain transitions with attack/release
         let coeff = if target_gain > self.envelope {
-            self.attack_coeff  // Opening: use attack time
+            self.attack_coeff // Opening: use attack time
         } else {
-            self.release_coeff  // Closing: use release time
+            self.release_coeff // Closing: use release time
         };
-        
+
         // Exponential smoothing: envelope = coeff * envelope + (1 - coeff) * target
         self.envelope = coeff * self.envelope + (1.0 - coeff) * target_gain;
-        
+
         // Apply gain
         input * self.envelope
     }
@@ -156,9 +146,7 @@ impl NoiseGate {
     /// Reset gate state
     pub fn reset(&mut self) {
         self.envelope = 0.0;
-        self.rms_buffer.fill(0.0);
-        self.rms_cursor = 0;
-        self.sum_of_squares = 0.0;
+        self.envelope_squared = 0.0;
         self.is_open = false;
     }
     
@@ -171,50 +159,57 @@ impl NoiseGate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_noise_gate_opens_above_threshold() {
         let mut gate = NoiseGate::new(-40.0, 10.0, 100.0, 48000.0);
-        
+
         // Feed strong signal (should open gate)
-        let strong_signal = vec![0.1; 1000];  // About -20 dB
-        let output = gate.process_block(&strong_signal);
-        
+        // With IIR envelope follower, need longer signal to build up envelope
+        let strong_signal = vec![0.1; 5000]; // About -20 dB, longer for IIR settling
+        let _output = gate.process_block(&strong_signal);
+
         // After processing, envelope should be high
         assert!(gate.envelope() > 0.5);
     }
-    
+
     #[test]
     fn test_noise_gate_closes_below_threshold() {
         let mut gate = NoiseGate::new(-40.0, 10.0, 100.0, 48000.0);
-        
-        // First open the gate with strong signal
-        let strong_signal = vec![0.1; 1000];
+
+        // First open the gate with strong signal (longer for IIR)
+        let strong_signal = vec![0.1; 5000];
         gate.process_block(&strong_signal);
-        
+
         // Then feed weak signal (should close gate)
-        let weak_signal = vec![0.0001; 10000];  // About -80 dB
+        // With IIR, envelope decays exponentially - need more samples
+        let weak_signal = vec![0.0001; 20000]; // About -80 dB
         gate.process_block(&weak_signal);
-        
-        // Envelope should be low (but takes time due to release)
-        assert!(gate.envelope() < 0.9);
+
+        // Envelope should be low after sufficient decay time
+        assert!(
+            gate.envelope() < 0.5,
+            "Expected envelope < 0.5, got {}",
+            gate.envelope()
+        );
     }
-    
+
     #[test]
     fn test_noise_gate_hysteresis() {
         let mut gate = NoiseGate::new(-40.0, 1.0, 1.0, 48000.0);
-        
+
         // Gate starts closed
         assert!(!gate.is_open);
-        
-        // Signal just above threshold should open it
-        let signal_above = vec![0.01; 500];  // About -40 dB
+
+        // Signal well above threshold should open it (longer for IIR settling)
+        let signal_above = vec![0.02; 3000]; // About -34 dB, clearly above threshold
         gate.process_block(&signal_above);
-        assert!(gate.is_open);
-        
+        assert!(gate.is_open, "Gate should be open after strong signal");
+
         // Signal slightly below threshold shouldn't close it immediately (hysteresis)
-        let signal_slightly_below = vec![0.007; 500];  // About -43 dB
+        // Need to stay above (threshold - hysteresis) = -43 dB
+        let signal_slightly_below = vec![0.008; 1000]; // About -42 dB
         gate.process_block(&signal_slightly_below);
-        assert!(gate.is_open);  // Still open due to hysteresis
+        assert!(gate.is_open, "Gate should still be open due to hysteresis");
     }
 }

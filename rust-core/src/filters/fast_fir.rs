@@ -157,8 +157,9 @@ impl FastFirFilter {
 mod tests {
     use super::*;
     use crate::filters::design::*;
+    use crate::filters::fir::FirFilter;
     use crate::filters::windows::WindowType;
-    
+
     #[test]
     fn test_fast_fir_impulse() {
         // Simple 5-tap filter
@@ -185,7 +186,7 @@ mod tests {
         let coeffs = design_bandpass_fir(&spec);
         
         let mut fast_filter = FastFirFilter::new(coeffs.clone(), 512);
-        let mut direct_filter = super::FirFilter::new(coeffs);
+        let mut direct_filter = FirFilter::new(coeffs);
         
         // Random input
         let input: Vec<f64> = (0..512).map(|i| (i as f64 * 0.01).sin()).collect();

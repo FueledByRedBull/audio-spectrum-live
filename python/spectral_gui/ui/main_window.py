@@ -146,19 +146,22 @@ class MainWindow(QMainWindow):
     def _update_plots(self):
         """Update plots with new data (called at 60 Hz)"""
         try:
-            # Get processed audio data
+            # Get processed audio data (uses cached results to prevent double-fetch)
             waveform_data = self.dsp_controller.get_waveform_data()
             spectrum_data = self.dsp_controller.get_spectrum_data()
-            
+
+            # Clear cache after both getters have been called
+            self.dsp_controller.clear_cache()
+
             if waveform_data is not None:
                 self.waveform_plot.update_plot(waveform_data)
-                
+
             if spectrum_data is not None:
                 self.spectrum_plot.update_plot(
                     spectrum_data['frequencies'],
                     spectrum_data['magnitude']
                 )
-                
+
         except Exception as e:
             self.statusBar.showMessage(f"Update error: {e}")
             

@@ -18,23 +18,48 @@ pub enum FilterType {
     Highpass,
 }
 
+/// Maximum buffer sizes for pre-allocated arrays
+pub const MAX_WAVEFORM_SIZE: usize = 4096;
+pub const MAX_SPECTRUM_SIZE: usize = 4097; // FFT_SIZE/2 + 1 for largest FFT (8192)
+
 /// Results from audio processing (sent to Python)
+/// Uses fixed-size arrays to eliminate hot-path allocations
 #[derive(Clone)]
 pub struct ProcessingResults {
-    /// Input waveform samples
-    pub input_waveform: Vec<f64>,
-    
-    /// Filtered waveform samples
-    pub filtered_waveform: Vec<f64>,
-    
-    /// Spectrum magnitude in dB
-    pub spectrum_magnitude: Vec<f64>,
-    
-    /// Frequency bins in Hz
-    pub spectrum_frequencies: Vec<f64>,
-    
+    /// Input waveform samples (fixed-size buffer)
+    pub input_waveform: Box<[f64; MAX_WAVEFORM_SIZE]>,
+
+    /// Filtered waveform samples (fixed-size buffer)
+    pub filtered_waveform: Box<[f64; MAX_WAVEFORM_SIZE]>,
+
+    /// Spectrum magnitude in dB (fixed-size buffer)
+    pub spectrum_magnitude: Box<[f64; MAX_SPECTRUM_SIZE]>,
+
+    /// Frequency bins in Hz (fixed-size buffer)
+    pub spectrum_frequencies: Box<[f64; MAX_SPECTRUM_SIZE]>,
+
+    /// Actual length of waveform data
+    pub waveform_len: usize,
+
+    /// Actual length of spectrum data
+    pub spectrum_len: usize,
+
     /// Sample rate
     pub sample_rate: f64,
+}
+
+impl Default for ProcessingResults {
+    fn default() -> Self {
+        Self {
+            input_waveform: Box::new([0.0; MAX_WAVEFORM_SIZE]),
+            filtered_waveform: Box::new([0.0; MAX_WAVEFORM_SIZE]),
+            spectrum_magnitude: Box::new([0.0; MAX_SPECTRUM_SIZE]),
+            spectrum_frequencies: Box::new([0.0; MAX_SPECTRUM_SIZE]),
+            waveform_len: 0,
+            spectrum_len: 0,
+            sample_rate: 48000.0,
+        }
+    }
 }
 
 /// High-performance audio processor
@@ -192,72 +217,89 @@ impl AudioProcessor {
         let handle = std::thread::spawn(move || {
             let mut temp_buffer = vec![0.0; 2048];
             let mut waveform_buffer = vec![0.0; 2048];
+            let mut filtered_buffer = vec![0.0; MAX_WAVEFORM_SIZE];
+            let mut padded_signal = vec![0.0; 8192]; // Max FFT size
             let mut consumer = consumer;
-            
+
+            // Pre-allocate results buffer (reused each frame - no hot-path allocations)
+            let mut result_buffer = ProcessingResults::default();
+
             while running.load(Ordering::SeqCst) {
                 // Read audio samples (blocks if not available)
                 let n = consumer.read(&mut temp_buffer);
-                
+
                 if n > 0 {
+                    let n = n.min(MAX_WAVEFORM_SIZE); // Clamp to max size
                     // Store input waveform
                     waveform_buffer[..n].copy_from_slice(&temp_buffer[..n]);
-                    
+
                     // Apply filter chain (if not bypassed)
-                    let filtered = if bypass.load(Ordering::SeqCst) {
-                        waveform_buffer[..n].to_vec()
+                    let filtered_len = if bypass.load(Ordering::SeqCst) {
+                        filtered_buffer[..n].copy_from_slice(&waveform_buffer[..n]);
+                        n
                     } else {
                         // Process through filter chain
+                        // Note: filter.process_block still allocates - this is acceptable
+                        // since filters need variable-length output for FFT convolution
                         let mut signal = waveform_buffer[..n].to_vec();
-                        
+
                         if let Ok(mut chain_guard) = filter_chain.lock() {
-                            // Apply each active filter in the chain sequentially
                             for filter_opt in chain_guard.iter_mut() {
                                 if let Some(filter) = filter_opt {
                                     signal = filter.process_block(&signal);
                                 }
                             }
                         }
-                        
-                        signal
+
+                        let len = signal.len().min(MAX_WAVEFORM_SIZE);
+                        filtered_buffer[..len].copy_from_slice(&signal[..len]);
+                        len
                     };
-                    
+
                     // Analyze spectrum (use fixed-size buffer for consistent output)
-                    let (spectrum_mag, spectrum_freq) = if let Ok(mut analyzer) = analyzer.lock() {
-                        // Always use full FFT size to get consistent spectrum length
+                    let spectrum_len = if let Ok(mut analyzer) = analyzer.lock() {
                         let fft_size = analyzer.config().fft_size;
-                        let mut padded_signal = vec![0.0; fft_size];
-                        let copy_len = filtered.len().min(fft_size);
-                        padded_signal[..copy_len].copy_from_slice(&filtered[..copy_len]);
-                        
-                        let mag = analyzer.analyze_db(&padded_signal, 1.0);
+                        let copy_len = filtered_len.min(fft_size);
+
+                        // Clear and fill padded signal buffer
+                        padded_signal[..fft_size].fill(0.0);
+                        padded_signal[..copy_len].copy_from_slice(&filtered_buffer[..copy_len]);
+
+                        let mag = analyzer.analyze_db(&padded_signal[..fft_size], 1.0);
                         let freq = analyzer.frequency_bins_hz();
-                        (mag, freq)
+
+                        let spec_len = mag.len().min(MAX_SPECTRUM_SIZE);
+                        result_buffer.spectrum_magnitude[..spec_len].copy_from_slice(&mag[..spec_len]);
+                        result_buffer.spectrum_frequencies[..spec_len].copy_from_slice(&freq[..spec_len]);
+                        spec_len
                     } else {
-                        (vec![], vec![])
+                        0
                     };
-                    
-                    // Store results for Python to read
+
+                    // Copy waveform data to result buffer
+                    result_buffer.input_waveform[..n].copy_from_slice(&waveform_buffer[..n]);
+                    result_buffer.filtered_waveform[..filtered_len].copy_from_slice(&filtered_buffer[..filtered_len]);
+                    result_buffer.waveform_len = n;
+                    result_buffer.spectrum_len = spectrum_len;
+                    result_buffer.sample_rate = sample_rate;
+
+                    // Store results for Python to read (clone the pre-allocated buffer)
                     if let Ok(mut results_guard) = results.lock() {
-                        *results_guard = Some(ProcessingResults {
-                            input_waveform: waveform_buffer[..n].to_vec(),
-                            filtered_waveform: filtered.clone(),
-                            spectrum_magnitude: spectrum_mag,
-                            spectrum_frequencies: spectrum_freq,
-                            sample_rate,
-                        });
+                        *results_guard = Some(result_buffer.clone());
                     }
-                    
+
                     // Send filtered audio to output if monitoring is enabled
                     if monitoring.load(Ordering::SeqCst) {
                         if let Ok(mut producer_guard) = output_producer.lock() {
                             if let Some(producer) = producer_guard.as_mut() {
-                                producer.write(&filtered);
+                                producer.write(&filtered_buffer[..filtered_len]);
                             }
                         }
                     }
                 } else {
-                    // No data available, yield to avoid busy-wait
-                    std::thread::yield_now();
+                    // No data available, sleep briefly to avoid busy-wait CPU burn
+                    // 100µs is short enough to maintain low latency but prevents spin-wait
+                    std::thread::sleep(std::time::Duration::from_micros(100));
                 }
             }
         });

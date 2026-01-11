@@ -109,7 +109,7 @@ impl PyAudioProcessor {
     }
     
     /// Get latest processing results
-    /// 
+    ///
     /// Returns:
     ///     Dictionary with keys: 'input_waveform', 'filtered_waveform',
     ///     'spectrum_magnitude', 'spectrum_frequencies', 'sample_rate'
@@ -117,17 +117,33 @@ impl PyAudioProcessor {
     fn get_results<'py>(&self, py: Python<'py>) -> Option<PyObject> {
         self.processor.get_results().map(|results| {
             let dict = pyo3::types::PyDict::new(py);
-            
-            dict.set_item("input_waveform", 
-                         PyArray1::from_vec(py, results.input_waveform)).ok();
-            dict.set_item("filtered_waveform",
-                         PyArray1::from_vec(py, results.filtered_waveform)).ok();
-            dict.set_item("spectrum_magnitude",
-                         PyArray1::from_vec(py, results.spectrum_magnitude)).ok();
-            dict.set_item("spectrum_frequencies",
-                         PyArray1::from_vec(py, results.spectrum_frequencies)).ok();
+
+            // Slice fixed-size arrays to actual data length
+            let waveform_len = results.waveform_len;
+            let spectrum_len = results.spectrum_len;
+
+            dict.set_item(
+                "input_waveform",
+                PyArray1::from_slice(py, &results.input_waveform[..waveform_len]),
+            )
+            .ok();
+            dict.set_item(
+                "filtered_waveform",
+                PyArray1::from_slice(py, &results.filtered_waveform[..waveform_len]),
+            )
+            .ok();
+            dict.set_item(
+                "spectrum_magnitude",
+                PyArray1::from_slice(py, &results.spectrum_magnitude[..spectrum_len]),
+            )
+            .ok();
+            dict.set_item(
+                "spectrum_frequencies",
+                PyArray1::from_slice(py, &results.spectrum_frequencies[..spectrum_len]),
+            )
+            .ok();
             dict.set_item("sample_rate", results.sample_rate).ok();
-            
+
             dict.into()
         })
     }

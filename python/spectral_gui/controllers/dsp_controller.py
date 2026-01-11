@@ -15,15 +15,26 @@ except ImportError:
 
 class DSPController:
     """High-performance controller using unified Rust AudioProcessor"""
-    
+
     def __init__(self):
         self.processor = None
         self.sample_rate = 48000.0
-        
+        self._cached_results = None  # Cache to prevent double-fetch race condition
+
         if RUST_AVAILABLE:
             self._initialize_processor()
         else:
             print("ERROR: Rust core required but not available")
+
+    def _fetch_results(self):
+        """Fetch and cache results from processor (prevents double-fetch)"""
+        if self._cached_results is None and self.processor:
+            self._cached_results = self.processor.get_results()
+        return self._cached_results
+
+    def clear_cache(self):
+        """Clear cached results after both getters have been called"""
+        self._cached_results = None
             
     def _initialize_processor(self):
         """Initialize unified AudioProcessor"""
@@ -160,32 +171,32 @@ class DSPController:
     def get_waveform_data(self) -> Optional[Dict]:
         """
         Get latest waveform data
-        
+
         Returns:
             Dictionary with 'time', 'input' and 'filtered' numpy arrays, or None
         """
         if not self.processor:
             return None
-            
+
         try:
-            results = self.processor.get_results()
-            
+            results = self._fetch_results()  # Use cached results
+
             if results is None:
                 return None
-            
+
             # Create time axis
             input_waveform = np.array(results['input_waveform'], dtype=np.float64)
             filtered_waveform = np.array(results['filtered_waveform'], dtype=np.float64)
             sample_rate = float(results['sample_rate'])
-            
+
             time = np.arange(len(input_waveform)) / sample_rate
-                
+
             return {
                 'time': time,
                 'input': input_waveform,
                 'filtered': filtered_waveform,
             }
-            
+
         except Exception as e:
             print(f"Error getting waveform: {e}")
             return None
@@ -193,28 +204,28 @@ class DSPController:
     def get_spectrum_data(self) -> Optional[Dict]:
         """
         Get latest spectrum data
-        
+
         Returns:
             Dictionary with 'frequencies' and 'magnitude' arrays, or None
         """
         if not self.processor:
             return None
-            
+
         try:
-            results = self.processor.get_results()
-            
+            results = self._fetch_results()  # Use cached results
+
             if results is None:
                 return None
-            
+
             # Ensure arrays are proper numpy arrays
             frequencies = np.array(results['spectrum_frequencies'], dtype=np.float64)
             magnitude = np.array(results['spectrum_magnitude'], dtype=np.float64)
-                
+
             return {
                 'frequencies': frequencies,
                 'magnitude': magnitude,
             }
-            
+
         except Exception as e:
             print(f"Error getting spectrum: {e}")
             return None

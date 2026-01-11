@@ -54,3 +54,5 @@ plan.md
 
 # Python GUI package (source code stays)
 # Installed module conflicts handled by package rename
+.claude/
+nul

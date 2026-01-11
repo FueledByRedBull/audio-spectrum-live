@@ -143,16 +143,20 @@ mod tests {
     #[test]
     fn test_fft_dc_signal() {
         let mut fft = FftEngine::new(1024);
-        
-        // DC signal (constant)
-        let signal = vec![1.0; 100];
+
+        // DC signal (constant) - use full FFT size to avoid zero-padding leakage
+        let signal = vec![1.0; 1024];
         let spectrum = fft.compute_magnitude(&signal);
-        
-        // DC bin (k=0) should have high magnitude
-        assert!(spectrum[0] > 90.0);  // ~100 for 100 samples
-        
-        // Other bins should be near zero
-        assert!(spectrum[10] < 1.0);
+
+        // DC bin (k=0) should have high magnitude (~1024 for 1024 samples)
+        assert!(spectrum[0] > 1000.0);
+
+        // Other bins should be near zero (no leakage when signal fills entire buffer)
+        assert!(
+            spectrum[10] < 1.0,
+            "Expected spectrum[10] < 1.0, got {}",
+            spectrum[10]
+        );
     }
     
     #[test]
