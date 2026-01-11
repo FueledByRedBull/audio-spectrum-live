@@ -107,38 +107,39 @@ pub struct AudioProcessor {
     sample_rate: f64,
 }
 
-/// Trait for polymorphic filter types
+/// Trait for polymorphic filter types with zero-allocation in-place processing
 trait FilterTrait {
-    fn process_block(&mut self, input: &[f64]) -> Vec<f64>;
+    /// Process block in-place (zero allocations)
+    fn process_block_inplace(&mut self, buffer: &mut [f64]);
     #[allow(dead_code)]
     fn reset(&mut self);
 }
 
 impl FilterTrait for FirFilter {
-    fn process_block(&mut self, input: &[f64]) -> Vec<f64> {
-        FirFilter::process_block(self, input)
+    fn process_block_inplace(&mut self, buffer: &mut [f64]) {
+        FirFilter::process_block_inplace(self, buffer)
     }
-    
+
     fn reset(&mut self) {
         FirFilter::reset(self)
     }
 }
 
 impl FilterTrait for FastFirFilter {
-    fn process_block(&mut self, input: &[f64]) -> Vec<f64> {
-        FastFirFilter::process_block(self, input)
+    fn process_block_inplace(&mut self, buffer: &mut [f64]) {
+        FastFirFilter::process_block_inplace(self, buffer)
     }
-    
+
     fn reset(&mut self) {
         FastFirFilter::reset(self)
     }
 }
 
 impl FilterTrait for NoiseGate {
-    fn process_block(&mut self, input: &[f64]) -> Vec<f64> {
-        NoiseGate::process_block(self, input)
+    fn process_block_inplace(&mut self, buffer: &mut [f64]) {
+        NoiseGate::process_block_inplace(self, buffer)
     }
-    
+
     fn reset(&mut self) {
         NoiseGate::reset(self)
     }
@@ -233,27 +234,22 @@ impl AudioProcessor {
                     // Store input waveform
                     waveform_buffer[..n].copy_from_slice(&temp_buffer[..n]);
 
-                    // Apply filter chain (if not bypassed)
+                    // Apply filter chain (if not bypassed) - ZERO ALLOCATIONS
+                    // Copy input to filtered_buffer, then process in-place
+                    filtered_buffer[..n].copy_from_slice(&waveform_buffer[..n]);
+
                     let filtered_len = if bypass.load(Ordering::SeqCst) {
-                        filtered_buffer[..n].copy_from_slice(&waveform_buffer[..n]);
                         n
                     } else {
-                        // Process through filter chain
-                        // Note: filter.process_block still allocates - this is acceptable
-                        // since filters need variable-length output for FFT convolution
-                        let mut signal = waveform_buffer[..n].to_vec();
-
+                        // Process through filter chain IN-PLACE (no allocations)
                         if let Ok(mut chain_guard) = filter_chain.lock() {
                             for filter_opt in chain_guard.iter_mut() {
                                 if let Some(filter) = filter_opt {
-                                    signal = filter.process_block(&signal);
+                                    filter.process_block_inplace(&mut filtered_buffer[..n]);
                                 }
                             }
                         }
-
-                        let len = signal.len().min(MAX_WAVEFORM_SIZE);
-                        filtered_buffer[..len].copy_from_slice(&signal[..len]);
-                        len
+                        n
                     };
 
                     // Analyze spectrum (use fixed-size buffer for consistent output)

@@ -137,6 +137,55 @@ impl FastFirFilter {
         output
     }
     
+    /// Process block in-place using FFT-based overlap-add
+    ///
+    /// # Arguments
+    /// * `buffer` - Input/output buffer (modified in-place)
+    pub fn process_block_inplace(&mut self, buffer: &mut [f64]) {
+        let n = buffer.len().min(self.block_size);
+
+        // 1. Copy input to complex buffer and zero-pad
+        for i in 0..n {
+            self.input_buffer[i] = Complex::new(buffer[i], 0.0);
+        }
+        for i in n..self.fft_size {
+            self.input_buffer[i] = Complex::new(0.0, 0.0);
+        }
+
+        // 2. Forward FFT of input
+        self.fft.process(&mut self.input_buffer);
+
+        // 3. Multiply in frequency domain (convolution in time domain)
+        for i in 0..self.fft_size {
+            self.output_buffer[i] = self.input_buffer[i] * self.h_fft[i];
+        }
+
+        // 4. Inverse FFT
+        self.ifft.process(&mut self.output_buffer);
+
+        // 5. Scale by 1/N (IFFT normalization)
+        let scale = 1.0 / self.fft_size as f64;
+
+        // 6. Overlap-add: combine with tail from previous block, write directly to buffer
+        for i in 0..n {
+            buffer[i] = self.output_buffer[i].re * scale;
+
+            // Add overlap from previous block
+            if i < self.overlap.len() {
+                buffer[i] += self.overlap[i];
+            }
+        }
+
+        // 7. Save tail for next block
+        for i in 0..(self.filter_length - 1) {
+            if n + i < self.fft_size {
+                self.overlap[i] = self.output_buffer[n + i].re * scale;
+            } else {
+                self.overlap[i] = 0.0;
+            }
+        }
+    }
+
     /// Reset filter state
     pub fn reset(&mut self) {
         self.overlap.fill(0.0);
