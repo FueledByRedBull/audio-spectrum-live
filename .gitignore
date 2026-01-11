@@ -29,21 +29,28 @@ venv/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
+*.bak
 
 # Build artifacts
 /wheels/
 *.whl
 
-# Documentation (keep only README.md)
+# Documentation (keep only README.md and FILTER_PRESETS.md)
 QUICKSTART.md
 PROJECT_OVERVIEW.md
 IMPLEMENTATION_SUMMARY.md
 PERFORMANCE_OPTIMIZATIONS.md
 plan.md
+
+# Backup files
+*.backup
+*.py.backup
+*.rs.backup
 
 # Python GUI package (source code stays)
 # Installed module conflicts handled by package rename

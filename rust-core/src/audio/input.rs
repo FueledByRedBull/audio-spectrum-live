@@ -24,6 +24,9 @@ pub enum AudioError {
     
     #[error("Failed to play stream: {0}")]
     PlayStream(String),
+    
+    #[error("Device does not support 48000 Hz (found: {0} Hz). Please change device sample rate to 48000 Hz in system settings.")]
+    UnsupportedSampleRate(u32),
 }
 
 /// Audio input device information
@@ -68,10 +71,16 @@ impl AudioInput {
             .map_err(|e| AudioError::DefaultConfig(e.to_string()))?;
         
         let sample_rate = config.sample_rate().0;
+        
+        // Require 48 kHz - refuse to start otherwise
+        if sample_rate != 48000 {
+            return Err(AudioError::UnsupportedSampleRate(sample_rate));
+        }
+        
         let channels = config.channels();
         
         let device_info = AudioDeviceInfo {
-            name,
+            name: name.clone(),
             sample_rate,
             channels,
         };

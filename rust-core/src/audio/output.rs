@@ -39,10 +39,16 @@ impl AudioOutput {
             .map_err(|e| AudioError::DefaultConfig(e.to_string()))?;
         
         let sample_rate = config.sample_rate().0;
+        
+        // Require 48 kHz - refuse to start otherwise
+        if sample_rate != 48000 {
+            return Err(AudioError::UnsupportedSampleRate(sample_rate));
+        }
+        
         let channels = config.channels();
         
         let device_info = AudioDeviceInfo {
-            name,
+            name: name.clone(),
             sample_rate,
             channels,
         };

@@ -18,5 +18,8 @@ fn spectral_workbench(_py: Python, m: &PyModule) -> PyResult<()> {
     // Add WindowType enum
     m.add_class::<filter_bindings::PyWindowType>()?;
     
+    // Add FilterType enum
+    m.add_class::<processor_bindings::PyFilterType>()?;
+    
     Ok(())
 }

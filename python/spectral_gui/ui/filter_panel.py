@@ -1,5 +1,5 @@
 """
-Filter control panel
+Filter control panel with spinbox controls and filter type selection
 """
 
 from PyQt6.QtWidgets import (
@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
-    QSlider,
+    QDoubleSpinBox,
     QComboBox,
     QPushButton,
     QGroupBox,
@@ -17,9 +17,19 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+# Filter presets: (omega_c1, omega_c2, delta_omega, description)
+FILTER_PRESETS = {
+    'Voice (300-3400 Hz)': (0.0393, 0.4451, 0.050),
+    'Music Bass (20-250 Hz)': (0.0026, 0.0327, 0.010),
+    'Music Treble (4-16 kHz)': (0.5236, 1.000, 0.100),
+    'Narrow Notch (1 kHz)': (0.1257, 0.1413, 0.010),
+    'Wide Band (100-10 kHz)': (0.0131, 1.000, 0.050),
+    'Part A Spec (0.4π-0.6π)': (0.400, 0.600, 0.050),
+}
+
 
 class FilterPanel(QWidget):
-    """Filter parameter control panel"""
+    """Filter parameter control panel with spinbox controls"""
     
     def __init__(self, dsp_controller):
         super().__init__()
@@ -32,9 +42,27 @@ class FilterPanel(QWidget):
         """Setup the UI components"""
         layout = QVBoxLayout(self)
         
+        # Preset Selector (at top for discoverability)
+        preset_group = QGroupBox("Filter Presets")
+        preset_layout = QHBoxLayout()
+        self.preset_combo = QComboBox()
+        self.preset_combo.addItem("-- Select Preset --")
+        for preset_name in FILTER_PRESETS.keys():
+            self.preset_combo.addItem(preset_name)
+        preset_layout.addWidget(QLabel("Load Preset:"))
+        preset_layout.addWidget(self.preset_combo)
+        preset_group.setLayout(preset_layout)
+        layout.addWidget(preset_group)
+        
         # Filter Design Group
         filter_group = QGroupBox("Filter Design")
         filter_layout = QFormLayout()
+        
+        # Filter type selection
+        self.filter_type_combo = QComboBox()
+        self.filter_type_combo.addItems(["Bandpass", "Lowpass", "Highpass"])
+        self.filter_type_combo.setCurrentIndex(0)  # Default to Bandpass
+        filter_layout.addRow("Filter Type:", self.filter_type_combo)
         
         # Window type selection
         self.window_combo = QComboBox()
@@ -42,46 +70,51 @@ class FilterPanel(QWidget):
         self.window_combo.setCurrentIndex(1)  # Default to Hamming
         filter_layout.addRow("Window Type:", self.window_combo)
         
-        # Lower cutoff frequency (ωc1)
-        self.cutoff1_label = QLabel("0.375π")
-        self.cutoff1_slider = QSlider(Qt.Orientation.Horizontal)
-        self.cutoff1_slider.setMinimum(0)
-        self.cutoff1_slider.setMaximum(100)
-        self.cutoff1_slider.setValue(37)  # 0.375 * 100
-        self.cutoff1_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.cutoff1_slider.setTickInterval(10)
+        # Lower cutoff frequency (ωc1) - SpinBox
+        self.cutoff1_label = QLabel("ω = 0.370π (8.88 kHz)")
+        self.cutoff1_spinbox = QDoubleSpinBox()
+        self.cutoff1_spinbox.setRange(0.000, 1.000)
+        self.cutoff1_spinbox.setSingleStep(0.001)
+        self.cutoff1_spinbox.setDecimals(3)
+        self.cutoff1_spinbox.setValue(0.370)
+        self.cutoff1_spinbox.setKeyboardTracking(False)
+        self.cutoff1_spinbox.setMinimumWidth(100)
         
         cutoff1_layout = QVBoxLayout()
         cutoff1_layout.addWidget(self.cutoff1_label)
-        cutoff1_layout.addWidget(self.cutoff1_slider)
-        filter_layout.addRow("Lower Cutoff (ωc1):", cutoff1_layout)
+        cutoff1_layout.addWidget(self.cutoff1_spinbox)
+        self.cutoff1_row_label = QLabel("Lower Cutoff (ωc1):")
+        filter_layout.addRow(self.cutoff1_row_label, cutoff1_layout)
         
-        # Upper cutoff frequency (ωc2)
-        self.cutoff2_label = QLabel("0.625π")
-        self.cutoff2_slider = QSlider(Qt.Orientation.Horizontal)
-        self.cutoff2_slider.setMinimum(0)
-        self.cutoff2_slider.setMaximum(100)
-        self.cutoff2_slider.setValue(62)  # 0.625 * 100
-        self.cutoff2_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.cutoff2_slider.setTickInterval(10)
+        # Upper cutoff frequency (ωc2) - SpinBox
+        self.cutoff2_label = QLabel("ω = 0.620π (14.88 kHz)")
+        self.cutoff2_spinbox = QDoubleSpinBox()
+        self.cutoff2_spinbox.setRange(0.000, 1.000)
+        self.cutoff2_spinbox.setSingleStep(0.001)
+        self.cutoff2_spinbox.setDecimals(3)
+        self.cutoff2_spinbox.setValue(0.620)
+        self.cutoff2_spinbox.setKeyboardTracking(False)
+        self.cutoff2_spinbox.setMinimumWidth(100)
         
         cutoff2_layout = QVBoxLayout()
         cutoff2_layout.addWidget(self.cutoff2_label)
-        cutoff2_layout.addWidget(self.cutoff2_slider)
-        filter_layout.addRow("Upper Cutoff (ωc2):", cutoff2_layout)
+        cutoff2_layout.addWidget(self.cutoff2_spinbox)
+        self.cutoff2_row_label = QLabel("Upper Cutoff (ωc2):")
+        filter_layout.addRow(self.cutoff2_row_label, cutoff2_layout)
         
-        # Transition width
-        self.transition_label = QLabel("0.05π")
-        self.transition_slider = QSlider(Qt.Orientation.Horizontal)
-        self.transition_slider.setMinimum(1)
-        self.transition_slider.setMaximum(20)
-        self.transition_slider.setValue(5)  # 0.05 * 100
-        self.transition_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.transition_slider.setTickInterval(5)
+        # Transition width - SpinBox
+        self.transition_label = QLabel("ω = 0.050π (1.20 kHz)")
+        self.transition_spinbox = QDoubleSpinBox()
+        self.transition_spinbox.setRange(0.001, 0.200)
+        self.transition_spinbox.setSingleStep(0.001)
+        self.transition_spinbox.setDecimals(3)
+        self.transition_spinbox.setValue(0.050)
+        self.transition_spinbox.setKeyboardTracking(False)
+        self.transition_spinbox.setMinimumWidth(100)
         
         transition_layout = QVBoxLayout()
         transition_layout.addWidget(self.transition_label)
-        transition_layout.addWidget(self.transition_slider)
+        transition_layout.addWidget(self.transition_spinbox)
         filter_layout.addRow("Transition Width (Δω):", transition_layout)
         
         # Filter info display
@@ -138,10 +171,16 @@ class FilterPanel(QWidget):
         
     def _connect_signals(self):
         """Connect signals to slots"""
-        # Sliders
-        self.cutoff1_slider.valueChanged.connect(self._update_cutoff1_label)
-        self.cutoff2_slider.valueChanged.connect(self._update_cutoff2_label)
-        self.transition_slider.valueChanged.connect(self._update_transition_label)
+        # Preset selector
+        self.preset_combo.currentTextChanged.connect(self._load_preset)
+        
+        # Filter type
+        self.filter_type_combo.currentTextChanged.connect(self._on_filter_type_changed)
+        
+        # SpinBoxes
+        self.cutoff1_spinbox.valueChanged.connect(self._update_cutoff1_label)
+        self.cutoff2_spinbox.valueChanged.connect(self._update_cutoff2_label)
+        self.transition_spinbox.valueChanged.connect(self._update_transition_label)
         
         # Buttons
         self.apply_button.clicked.connect(self._apply_filter)
@@ -153,32 +192,76 @@ class FilterPanel(QWidget):
         self.fft_size_combo.currentTextChanged.connect(self._update_fft_size)
         self.analysis_window_combo.currentTextChanged.connect(self._update_analysis_window)
         
+    def _load_preset(self, preset_name):
+        """Load filter parameters from preset"""
+        if preset_name in FILTER_PRESETS:
+            omega_c1, omega_c2, delta_omega = FILTER_PRESETS[preset_name]
+            self.cutoff1_spinbox.setValue(omega_c1)
+            self.cutoff2_spinbox.setValue(omega_c2)
+            self.transition_spinbox.setValue(delta_omega)
+            # Note: valueChanged signals will automatically update labels
+            
+    def _on_filter_type_changed(self, filter_type):
+        """Handle filter type change - show/hide cutoff spinboxes"""
+        if filter_type == "Lowpass":
+            # Hide lower cutoff
+            self.cutoff1_spinbox.setVisible(False)
+            self.cutoff1_label.setVisible(False)
+            self.cutoff1_row_label.setText("(Not used for Lowpass)")
+            
+            # Show upper cutoff
+            self.cutoff2_spinbox.setVisible(True)
+            self.cutoff2_label.setVisible(True)
+            self.cutoff2_row_label.setText("Cutoff Frequency:")
+            
+        elif filter_type == "Highpass":
+            # Show lower cutoff
+            self.cutoff1_spinbox.setVisible(True)
+            self.cutoff1_label.setVisible(True)
+            self.cutoff1_row_label.setText("Cutoff Frequency:")
+            
+            # Hide upper cutoff
+            self.cutoff2_spinbox.setVisible(False)
+            self.cutoff2_label.setVisible(False)
+            self.cutoff2_row_label.setText("(Not used for Highpass)")
+            
+        else:  # Bandpass
+            # Show both cutoffs
+            self.cutoff1_spinbox.setVisible(True)
+            self.cutoff1_label.setVisible(True)
+            self.cutoff1_row_label.setText("Lower Cutoff (ωc1):")
+            
+            self.cutoff2_spinbox.setVisible(True)
+            self.cutoff2_label.setVisible(True)
+            self.cutoff2_row_label.setText("Upper Cutoff (ωc2):")
+        
     def _update_cutoff1_label(self, value):
-        """Update cutoff1 label"""
-        freq = value / 100.0
-        self.cutoff1_label.setText(f"{freq:.3f}π")
+        """Update cutoff1 label with frequency in Hz"""
+        freq_hz = value * 24000.0  # value * (48000 / 2)
+        self.cutoff1_label.setText(f"ω = {value:.3f}π ({freq_hz:.2f} Hz)")
         
     def _update_cutoff2_label(self, value):
-        """Update cutoff2 label"""
-        freq = value / 100.0
-        self.cutoff2_label.setText(f"{freq:.3f}π")
+        """Update cutoff2 label with frequency in Hz"""
+        freq_hz = value * 24000.0  # value * (48000 / 2)
+        self.cutoff2_label.setText(f"ω = {value:.3f}π ({freq_hz:.2f} Hz)")
         
     def _update_transition_label(self, value):
-        """Update transition width label"""
-        width = value / 100.0
-        self.transition_label.setText(f"{width:.3f}π")
+        """Update transition width label with frequency in Hz"""
+        freq_hz = value * 24000.0  # value * (48000 / 2)
+        self.transition_label.setText(f"ω = {value:.3f}π ({freq_hz:.2f} Hz)")
         
     def _apply_filter(self):
         """Apply filter with current parameters"""
         try:
-            omega_c1 = self.cutoff1_slider.value() / 100.0
-            omega_c2 = self.cutoff2_slider.value() / 100.0
-            delta_omega = self.transition_slider.value() / 100.0 * 3.14159
+            omega_c1 = self.cutoff1_spinbox.value()
+            omega_c2 = self.cutoff2_spinbox.value()
+            delta_omega = self.transition_spinbox.value() * 3.14159  # Convert to radians
             window_type = self.window_combo.currentText()
+            filter_type = self.filter_type_combo.currentText()
             
             # Design and apply filter
             filter_info = self.dsp_controller.design_filter(
-                omega_c1, omega_c2, delta_omega, window_type
+                omega_c1, omega_c2, delta_omega, window_type, filter_type
             )
             
             # Update info labels
@@ -187,12 +270,14 @@ class FilterPanel(QWidget):
             
         except Exception as e:
             print(f"Error applying filter: {e}")
+            QMessageBox.critical(self, "Filter Error", f"Failed to apply filter:\n{e}")
             
     def _reset_to_part_a(self):
         """Reset to Part A specifications"""
-        self.cutoff1_slider.setValue(37)  # 0.375
-        self.cutoff2_slider.setValue(62)  # 0.625
-        self.transition_slider.setValue(5)  # 0.05
+        self.filter_type_combo.setCurrentText("Bandpass")
+        self.cutoff1_spinbox.setValue(0.400)  # 0.4π
+        self.cutoff2_spinbox.setValue(0.600)  # 0.6π
+        self.transition_spinbox.setValue(0.050)  # 0.05π
         self.window_combo.setCurrentIndex(1)  # Hamming
         self._apply_filter()
         
@@ -249,6 +334,6 @@ class FilterPanel(QWidget):
     def _update_analysis_window(self, window_name):
         """Update analysis window type"""
         try:
-            self.dsp_controller.set_analysis_window(window_name)
+            self.dsp_controller.set_window_type(window_name)
         except Exception as e:
             print(f"Error updating analysis window: {e}")

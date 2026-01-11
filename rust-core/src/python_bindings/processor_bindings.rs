@@ -2,8 +2,27 @@
 
 use pyo3::prelude::*;
 use numpy::PyArray1;
-use crate::audio::AudioProcessor;
+use crate::audio::{AudioProcessor, processor::FilterType};
 use super::filter_bindings::PyWindowType;
+
+/// Filter type for Python
+#[pyclass(name = "FilterType")]
+#[derive(Clone, Copy)]
+pub enum PyFilterType {
+    Bandpass,
+    Lowpass,
+    Highpass,
+}
+
+impl From<PyFilterType> for FilterType {
+    fn from(py_type: PyFilterType) -> Self {
+        match py_type {
+            PyFilterType::Bandpass => FilterType::Bandpass,
+            PyFilterType::Lowpass => FilterType::Lowpass,
+            PyFilterType::Highpass => FilterType::Highpass,
+        }
+    }
+}
 
 /// Unified audio processor exposed to Python
 /// 
@@ -44,6 +63,7 @@ impl PyAudioProcessor {
     ///     omega_c2: Upper cutoff frequency (normalized, units of π)
     ///     delta_omega: Transition width (radians)
     ///     window_type: Window type
+    ///     filter_type: Filter type (Bandpass/Lowpass/Highpass)
     /// 
     /// Returns:
     ///     Tuple of (filter_length, group_delay)
@@ -53,8 +73,9 @@ impl PyAudioProcessor {
         omega_c2: f64,
         delta_omega: f64,
         window_type: PyWindowType,
+        filter_type: PyFilterType,
     ) -> PyResult<(usize, f64)> {
-        self.processor.design_filter(omega_c1, omega_c2, delta_omega, window_type.into())
+        self.processor.design_filter(omega_c1, omega_c2, delta_omega, window_type.into(), filter_type.into())
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))
     }
     

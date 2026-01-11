@@ -2,12 +2,20 @@
 //! 
 //! Eliminates Python/Rust boundary overhead by processing audio entirely in Rust
 
-use crate::filters::{FirFilter, FastFirFilter, FilterSpec, WindowType, design_bandpass_fir};
+use crate::filters::{FirFilter, FastFirFilter, FilterSpec, WindowType, design_bandpass_fir, design_lowpass_fir, design_highpass_fir};
 use crate::spectrum::{SpectrumAnalyzer, analysis::AnalyzerConfig};
 use crate::audio::{AudioInput, AudioOutput, AudioRingBuffer, input::list_input_devices};
 use crate::audio::buffer::AudioProducer;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Filter type enumeration
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterType {
+    Bandpass,
+    Lowpass,
+    Highpass,
+}
 
 /// Results from audio processing (sent to Python)
 #[derive(Clone)]
@@ -188,9 +196,15 @@ impl AudioProcessor {
                         }
                     };
                     
-                    // Analyze spectrum
+                    // Analyze spectrum (use fixed-size buffer for consistent output)
                     let (spectrum_mag, spectrum_freq) = if let Ok(mut analyzer) = analyzer.lock() {
-                        let mag = analyzer.analyze_db(&filtered, 1.0);
+                        // Always use full FFT size to get consistent spectrum length
+                        let fft_size = analyzer.config().fft_size;
+                        let mut padded_signal = vec![0.0; fft_size];
+                        let copy_len = filtered.len().min(fft_size);
+                        padded_signal[..copy_len].copy_from_slice(&filtered[..copy_len]);
+                        
+                        let mag = analyzer.analyze_db(&padded_signal, 1.0);
                         let freq = analyzer.frequency_bins_hz();
                         (mag, freq)
                     } else {
@@ -250,9 +264,21 @@ impl AudioProcessor {
         omega_c2: f64,
         delta_omega: f64,
         window_type: WindowType,
+        filter_type: FilterType,
     ) -> Result<(usize, f64), String> {
-        let spec = FilterSpec::bandpass(omega_c1, omega_c2, delta_omega, window_type);
-        let coeffs = design_bandpass_fir(&spec);
+        // Design filter coefficients based on type
+        let coeffs = match filter_type {
+            FilterType::Bandpass => {
+                let spec = FilterSpec::bandpass(omega_c1, omega_c2, delta_omega, window_type);
+                design_bandpass_fir(&spec)
+            },
+            FilterType::Lowpass => {
+                design_lowpass_fir(omega_c2, delta_omega, window_type)
+            },
+            FilterType::Highpass => {
+                design_highpass_fir(omega_c1, delta_omega, window_type)
+            },
+        };
         
         let filter_length = coeffs.len();
         let group_delay = (filter_length - 1) as f64 / 2.0;

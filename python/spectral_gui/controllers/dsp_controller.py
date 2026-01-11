@@ -60,7 +60,8 @@ class DSPController:
         omega_c1: float,
         omega_c2: float,
         delta_omega: float,
-        window_type: str
+        window_type: str,
+        filter_type: str = "Bandpass"
     ) -> Dict:
         """
         Design a new FIR filter
@@ -70,6 +71,7 @@ class DSPController:
             omega_c2: Upper cutoff frequency (normalized, units of π)
             delta_omega: Transition width (radians)
             window_type: Window type name
+            filter_type: Filter type (Bandpass/Lowpass/Highpass)
             
         Returns:
             Dictionary with filter info
@@ -86,11 +88,20 @@ class DSPController:
                 'Rectangular': WindowType.Rectangular,
             }
             
+            # Map filter type string to enum
+            from spectral_workbench import FilterType
+            filter_map = {
+                'Bandpass': FilterType.Bandpass,
+                'Lowpass': FilterType.Lowpass,
+                'Highpass': FilterType.Highpass,
+            }
+            
             window_enum = window_map.get(window_type, WindowType.Hamming)
+            filter_enum = filter_map.get(filter_type, FilterType.Bandpass)
             
             # Design and apply filter in Rust
             filter_length, group_delay = self.processor.design_filter(
-                omega_c1, omega_c2, delta_omega, window_enum
+                omega_c1, omega_c2, delta_omega, window_enum, filter_enum
             )
             
             return {
@@ -151,7 +162,7 @@ class DSPController:
         Get latest waveform data
         
         Returns:
-            Dictionary with 'input' and 'filtered' numpy arrays, or None
+            Dictionary with 'time', 'input' and 'filtered' numpy arrays, or None
         """
         if not self.processor:
             return None
@@ -161,11 +172,18 @@ class DSPController:
             
             if results is None:
                 return None
+            
+            # Create time axis
+            input_waveform = np.array(results['input_waveform'], dtype=np.float64)
+            filtered_waveform = np.array(results['filtered_waveform'], dtype=np.float64)
+            sample_rate = float(results['sample_rate'])
+            
+            time = np.arange(len(input_waveform)) / sample_rate
                 
             return {
-                'input': results['input_waveform'],
-                'filtered': results['filtered_waveform'],
-                'sample_rate': results['sample_rate'],
+                'time': time,
+                'input': input_waveform,
+                'filtered': filtered_waveform,
             }
             
         except Exception as e:
@@ -187,10 +205,14 @@ class DSPController:
             
             if results is None:
                 return None
+            
+            # Ensure arrays are proper numpy arrays
+            frequencies = np.array(results['spectrum_frequencies'], dtype=np.float64)
+            magnitude = np.array(results['spectrum_magnitude'], dtype=np.float64)
                 
             return {
-                'frequencies': results['spectrum_frequencies'],
-                'magnitude': results['spectrum_magnitude'],
+                'frequencies': frequencies,
+                'magnitude': magnitude,
             }
             
         except Exception as e:
