@@ -15,8 +15,7 @@ High-performance real-time audio filtering and spectral analysis tool with Rust 
 - **Filter Presets**: 8 built-in presets for common use cases (voice, bass, treble, etc.)
 - **Unified Audio Processor**: All DSP processing in Rust thread, minimal Python/Rust boundary crossings
 - **Interactive GUI**: PyQt6 interface with real-time waveform and spectrum plots
-- **Event-Driven Architecture**: No polling loops, immediate response to audio data
-- **48 kHz Sample Rate Enforcement**: Refuses to start with mismatched audio device sample rates
+- **Automatic Sample Rate Conversion**: Supports any device sample rate (44.1kHz, 48kHz, etc.) with high-quality rubato resampling
 
 ## Project Structure
 
@@ -106,7 +105,7 @@ python -m spectral_gui.main
 - **Reset to Part A**: Load original DSP assignment specifications
 
 **Audio Controls**:
-- **Start Audio**: Begin capturing from default microphone (requires 48 kHz device)
+- **Start Audio**: Begin capturing from default microphone (any sample rate supported)
 - **Stop Audio**: Stop audio capture
 - **Monitor Output**: Listen to filtered audio through speakers/headphones
   - ⚠ Warning dialog to prevent feedback
@@ -120,7 +119,7 @@ python -m spectral_gui.main
   - Faster attack = more responsive, but may click on transients
 - **Release**: Time for gate to close when signal drops below threshold (10-1000 ms, default: 100 ms)
   - Slower release = smoother tail fade, prevents choppy audio
-- Uses RMS envelope detection with 50ms window and 3dB hysteresis for smooth operation
+- Uses IIR envelope follower with 50ms time constant and 3dB hysteresis for smooth operation
 
 **FFT Analysis**:
 - **FFT Size**: 512, 1024, 2048, 4096, or 8192 points
@@ -135,9 +134,9 @@ python -m spectral_gui.main
 ## Performance Optimizations
 
 ### Ring Buffer Architecture
-- **Zero allocations** in audio path using fixed-size Vec with modulo indexing
-- Replaced `VecDeque` with circular buffer for 48kHz sample rate processing
-- SIMD-friendly memory layout
+- **Pre-allocated buffers** in audio path using fixed-size arrays
+- Lock-free ring buffer for thread-safe audio transfer
+- Results buffer uses fixed-size arrays with length tracking to minimize allocations
 
 ### FFT-Based Fast Convolution
 - **O(N log N)** complexity for filters >128 taps (vs O(N*M) time-domain)
@@ -149,10 +148,10 @@ python -m spectral_gui.main
 - Python GUI calls `get_results()` only once per frame (60 Hz)
 - **800x reduction** in language boundary crossings (48kHz → 60Hz)
 
-### Event-Driven Design
-- No polling loops or fixed-time sleeps
-- Ring buffer consumer yields when empty, wakes immediately on data
-- cpal callbacks drive the processing thread
+### Efficient Processing Loop
+- Processing thread sleeps briefly (100µs) when no data available
+- Avoids busy-wait CPU burn while maintaining low latency
+- cpal callbacks drive audio capture and playback
 
 ### Fixed FFT Size for Spectrum
 - Always uses full FFT buffer (2048 samples) for consistent 1025-bin output
@@ -161,10 +160,10 @@ python -m spectral_gui.main
 
 ## Performance Metrics
 
-- **Latency**: <5ms round-trip (WASAPI + zero-allocation path)
+- **Latency**: <5ms round-trip (WASAPI + optimized processing path)
 - **GUI Updates**: 60 Hz
 - **CPU Usage**: <5% audio thread, <10% GUI thread
-- **Memory**: Zero allocations in hot path after initialization
+- **Memory**: Pre-allocated buffers minimize hot-path allocations
 - **Filter Precision**: 24 Hz steps at 48 kHz sampling (0.001 normalized frequency)
 
 ## Algorithm Details
@@ -202,7 +201,7 @@ Windowing method implementation with support for Bandpass, Lowpass, and Highpass
 
 ## Technical Stack
 
-- **DSP Core**: Rust 2021 with `rustfft` 6.4, `realfft` 3.5, `cpal` 0.15 (WASAPI), `ringbuf` 0.3
+- **DSP Core**: Rust 2021 with `rustfft` 6.4, `realfft` 3.5, `cpal` 0.15 (WASAPI), `ringbuf` 0.3, `rubato` 0.14 (resampling)
 - **Python Bindings**: PyO3 0.20, numpy 0.20
 - **GUI Framework**: PyQt6 6.6+
 - **Plotting**: pyqtgraph 0.13+ (optimized for real-time)
@@ -211,9 +210,9 @@ Windowing method implementation with support for Bandpass, Lowpass, and Highpass
 ## Requirements
 
 - **Windows 10/11** (WASAPI audio backend)
-- **Audio Devices**: Both input and output must be configured to **48 kHz** sample rate
-  - The application will refuse to start if devices are not at 48 kHz
-  - Check: Settings → Sound → Device Properties → Advanced → Default Format
+- **Audio Devices**: Any sample rate supported (44.1kHz, 48kHz, 96kHz, etc.)
+  - Automatic high-quality resampling to 48kHz internal processing rate
+  - Audio monitoring output requires 48kHz device
 - **Headphones Recommended**: For audio monitoring to avoid feedback loops
 
 ## Filter Presets
