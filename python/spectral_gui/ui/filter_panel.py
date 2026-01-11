@@ -17,14 +17,17 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
-# Filter presets: (omega_c1, omega_c2, delta_omega, description)
+# Filter presets: (omega_c1, omega_c2, delta_omega)
+# Normalized frequency = Hz / 24000 (Nyquist at 48 kHz)
 FILTER_PRESETS = {
-    'Voice (300-3400 Hz)': (0.0393, 0.4451, 0.050),
-    'Music Bass (20-250 Hz)': (0.0026, 0.0327, 0.010),
-    'Music Treble (4-16 kHz)': (0.5236, 1.000, 0.100),
-    'Narrow Notch (1 kHz)': (0.1257, 0.1413, 0.010),
-    'Wide Band (100-10 kHz)': (0.0131, 1.000, 0.050),
-    'Part A Spec (0.4π-0.6π)': (0.400, 0.600, 0.050),
+    'Voice (300-3400 Hz)': (0.0125, 0.1417, 0.0021),  # 300/24k, 3400/24k, 50 Hz transition
+    'Music Bass (20-250 Hz)': (0.0008, 0.0104, 0.0021),  # 20/24k, 250/24k, 50 Hz transition
+    'Music Treble (4-16 kHz)': (0.1667, 0.6667, 0.0208),  # 4000/24k, 16000/24k, 500 Hz transition
+    'Narrow Notch (900-1100 Hz)': (0.0375, 0.0458, 0.0021),  # 900/24k, 1100/24k, 50 Hz transition
+    'Wide Band (100-10 kHz)': (0.0042, 0.4167, 0.0083),  # 100/24k, 10000/24k, 200 Hz transition
+    'Part A Spec (0.4π-0.6π)': (0.400, 0.600, 0.050),  # 9.6-14.4 kHz (unchanged - already normalized)
+    'Clear Voice Ice (1.5-4 kHz)': (0.0625, 0.1667, 0.0083),  # 1500/24k, 4000/24k, 200 Hz transition
+    'Bassy Clear Voice (80-3 kHz)': (0.0033, 0.1250, 0.0083),  # 80/24k, 3000/24k, 200 Hz transition
 }
 
 
