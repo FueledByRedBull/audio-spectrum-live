@@ -158,16 +158,17 @@ pub fn design_highpass_fir(cutoff: f64, delta_omega: f64, window_type: WindowTyp
     for n in 0..m {
         let n_shifted = n as f64 - center;
         
+        // Highpass = impulse - lowpass
+        // h_ideal[n] = δ[n] - sin(wc*n)/(π*n)
         let h_ideal = if n_shifted.abs() < 1e-10 {
+            // At center: 1 - wc/π (already includes delta function)
             1.0 - wc_rad / PI
         } else {
+            // Off-center: -sin(wc*n)/(π*n)
             -((wc_rad * n_shifted).sin() / (PI * n_shifted))
         };
         
-        // Add impulse at center for highpass
-        let impulse = if n_shifted.abs() < 1e-10 { 1.0 } else { 0.0 };
-        
-        h.push((h_ideal + impulse) * window[n]);
+        h.push(h_ideal * window[n]);
     }
     
     h
