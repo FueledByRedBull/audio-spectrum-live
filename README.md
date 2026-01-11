@@ -6,6 +6,7 @@ High-performance real-time audio filtering and spectral analysis tool with Rust 
 
 - **Real-Time Audio Processing**: <5ms latency with zero-allocation ring buffer architecture
 - **Advanced FIR Filtering**: Bandpass, Lowpass, and Highpass filters with precise control
+- **Noise Gate**: Automatic background noise reduction with configurable threshold and smoothing
 - **High-Precision Filter Design**: 1000-step spinbox controls (24 Hz granularity at 48 kHz)
 - **Multiple Window Functions**: Hann, Hamming, Blackman, and Rectangular with different stopband characteristics
 - **FFT-Based Fast Convolution**: Automatic O(N log N) optimization for long filters (>128 taps)
@@ -31,6 +32,7 @@ audio-spectrum-live/
 │   │   ├── filters/        # FIR filter design (ring buffer, FFT convolution)
 │   │   ├── spectrum/       # FFT and spectral analysis
 │   │   ├── audio/          # Audio I/O with cpal + unified AudioProcessor
+│   │   │                   # Filter chain: [0]=NoiseGate → [1]=UserFilter
 │   │   └── python_bindings/# PyO3 bindings for Python
 │   └── Cargo.toml
 │
@@ -109,6 +111,16 @@ python -m spectral_gui.main
 - **Monitor Output**: Listen to filtered audio through speakers/headphones
   - ⚠ Warning dialog to prevent feedback
   - Use headphones recommended
+
+**Noise Gate**:
+- **Enable**: Toggle noise gate on/off to reduce background noise
+- **Threshold**: Signal level in dB below which gate closes (-80 to -10 dB, default: -40 dB)
+  - Adjust higher to gate out more noise, lower for sensitive material
+- **Attack**: Time for gate to open when signal exceeds threshold (1-100 ms, default: 10 ms)
+  - Faster attack = more responsive, but may click on transients
+- **Release**: Time for gate to close when signal drops below threshold (10-1000 ms, default: 100 ms)
+  - Slower release = smoother tail fade, prevents choppy audio
+- Uses RMS envelope detection with 50ms window and 3dB hysteresis for smooth operation
 
 **FFT Analysis**:
 - **FFT Size**: 512, 1024, 2048, 4096, or 8192 points

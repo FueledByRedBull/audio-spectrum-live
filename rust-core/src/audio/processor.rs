@@ -6,6 +6,7 @@ use crate::filters::{FirFilter, FastFirFilter, FilterSpec, WindowType, design_ba
 use crate::spectrum::{SpectrumAnalyzer, analysis::AnalyzerConfig};
 use crate::audio::{AudioInput, AudioOutput, AudioRingBuffer, input::list_input_devices};
 use crate::audio::buffer::AudioProducer;
+use crate::audio::gate::NoiseGate;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -41,8 +42,14 @@ pub struct ProcessingResults {
 /// Runs audio capture, filtering, and FFT analysis in Rust thread
 /// Python only reads results (no per-sample boundary crossing)
 pub struct AudioProcessor {
-    /// Filter (use fast version for long filters)
-    filter: Arc<Mutex<Option<Box<dyn FilterTrait + Send>>>>,
+    /// Filter chain (applied in order: noise gate → user filter)
+    filter_chain: Arc<Mutex<Vec<Option<Box<dyn FilterTrait + Send>>>>>,
+    
+    /// Noise gate enabled flag
+    gate_enabled: Arc<AtomicBool>,
+    
+    /// Noise gate parameters (threshold_db, attack_ms, release_ms)
+    gate_params: Arc<Mutex<(f64, f64, f64)>>,
     
     /// Spectrum analyzer
     analyzer: Arc<Mutex<SpectrumAnalyzer>>,
@@ -78,6 +85,7 @@ pub struct AudioProcessor {
 /// Trait for polymorphic filter types
 trait FilterTrait {
     fn process_block(&mut self, input: &[f64]) -> Vec<f64>;
+    #[allow(dead_code)]
     fn reset(&mut self);
 }
 
@@ -101,20 +109,32 @@ impl FilterTrait for FastFirFilter {
     }
 }
 
+impl FilterTrait for NoiseGate {
+    fn process_block(&mut self, input: &[f64]) -> Vec<f64> {
+        NoiseGate::process_block(self, input)
+    }
+    
+    fn reset(&mut self) {
+        NoiseGate::reset(self)
+    }
+}
+
 impl AudioProcessor {
     /// Create new audio processor
     pub fn new() -> Self {
         let sample_rate = 48000.0;
         
         let analyzer_config = AnalyzerConfig {
-            fft_size: 2048,
+            fft_size: 4096,  // Larger FFT for better frequency resolution
             window_type: WindowType::Hamming,
             sample_rate,
             apply_correction: true,
         };
         
         Self {
-            filter: Arc::new(Mutex::new(None)),
+            filter_chain: Arc::new(Mutex::new(vec![None, None])),  // [0] = gate, [1] = user filter
+            gate_enabled: Arc::new(AtomicBool::new(false)),
+            gate_params: Arc::new(Mutex::new((-40.0, 10.0, 100.0))),  // Default: -40dB, 10ms attack, 100ms release
             analyzer: Arc::new(Mutex::new(SpectrumAnalyzer::new(analyzer_config))),
             results: Arc::new(Mutex::new(None)),
             audio_input: None,
@@ -159,7 +179,8 @@ impl AudioProcessor {
         // Start processing thread (hot loop stays in Rust!)
         self.running.store(true, Ordering::SeqCst);
         
-        let filter = Arc::clone(&self.filter);
+        let filter_chain = Arc::clone(&self.filter_chain);
+
         let analyzer = Arc::clone(&self.analyzer);
         let results = Arc::clone(&self.results);
         let running = Arc::clone(&self.running);
@@ -181,19 +202,23 @@ impl AudioProcessor {
                     // Store input waveform
                     waveform_buffer[..n].copy_from_slice(&temp_buffer[..n]);
                     
-                    // Apply filter (if not bypassed)
+                    // Apply filter chain (if not bypassed)
                     let filtered = if bypass.load(Ordering::SeqCst) {
                         waveform_buffer[..n].to_vec()
                     } else {
-                        if let Ok(mut filter_guard) = filter.lock() {
-                            if let Some(filt) = filter_guard.as_mut() {
-                                filt.process_block(&waveform_buffer[..n])
-                            } else {
-                                waveform_buffer[..n].to_vec()
+                        // Process through filter chain
+                        let mut signal = waveform_buffer[..n].to_vec();
+                        
+                        if let Ok(mut chain_guard) = filter_chain.lock() {
+                            // Apply each active filter in the chain sequentially
+                            for filter_opt in chain_guard.iter_mut() {
+                                if let Some(filter) = filter_opt {
+                                    signal = filter.process_block(&signal);
+                                }
                             }
-                        } else {
-                            waveform_buffer[..n].to_vec()
                         }
+                        
+                        signal
                     };
                     
                     // Analyze spectrum (use fixed-size buffer for consistent output)
@@ -292,8 +317,9 @@ impl AudioProcessor {
             Box::new(FirFilter::new(coeffs))
         };
         
-        if let Ok(mut filter_guard) = self.filter.lock() {
-            *filter_guard = Some(new_filter);
+        // Update filter chain: position 1 is user filter (after gate)
+        if let Ok(mut chain_guard) = self.filter_chain.lock() {
+            chain_guard[1] = Some(new_filter);
         }
         
         Ok((filter_length, group_delay))
@@ -381,6 +407,48 @@ impl AudioProcessor {
         list_input_devices()
             .map(|devices| devices.iter().map(|d| d.name.clone()).collect())
             .map_err(|e| format!("Failed to list devices: {}", e))
+    }
+    
+
+    
+    /// Configure noise gate
+    ///
+    /// # Arguments
+    /// * `enabled` - Enable or disable the noise gate
+    /// * `threshold_db` - Threshold in dB (e.g., -40.0)
+    /// * `attack_ms` - Attack time in milliseconds (e.g., 10.0)
+    /// * `release_ms` - Release time in milliseconds (e.g., 100.0)
+    pub fn configure_noise_gate(&mut self, enabled: bool, threshold_db: f64, attack_ms: f64, release_ms: f64) {
+        self.gate_enabled.store(enabled, Ordering::SeqCst);
+        
+        // Store parameters
+        if let Ok(mut params) = self.gate_params.lock() {
+            *params = (threshold_db, attack_ms, release_ms);
+        }
+        
+        if enabled {
+            // Create and install noise gate at position 0
+            let gate: Box<dyn FilterTrait + Send> = Box::new(NoiseGate::new(
+                threshold_db,
+                attack_ms,
+                release_ms,
+                self.sample_rate,
+            ));
+            
+            if let Ok(mut chain_guard) = self.filter_chain.lock() {
+                chain_guard[0] = Some(gate);
+            }
+        } else {
+            // Remove gate (position 0)
+            if let Ok(mut chain_guard) = self.filter_chain.lock() {
+                chain_guard[0] = None;
+            }
+        }
+    }
+    
+    /// Check if noise gate is enabled
+    pub fn is_gate_enabled(&self) -> bool {
+        self.gate_enabled.load(Ordering::SeqCst)
     }
 }
 

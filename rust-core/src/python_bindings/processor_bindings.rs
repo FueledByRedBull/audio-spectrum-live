@@ -138,4 +138,22 @@ impl PyAudioProcessor {
         AudioProcessor::list_devices()
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))
     }
+    
+
+    
+    /// Configure noise gate
+    ///
+    /// Args:
+    ///     enabled: Enable or disable the noise gate
+    ///     threshold_db: Threshold in dB (e.g., -40.0)
+    ///     attack_ms: Attack time in milliseconds (e.g., 10.0)
+    ///     release_ms: Release time in milliseconds (e.g., 100.0)
+    fn configure_noise_gate(&mut self, enabled: bool, threshold_db: f64, attack_ms: f64, release_ms: f64) {
+        self.processor.configure_noise_gate(enabled, threshold_db, attack_ms, release_ms);
+    }
+    
+    /// Check if noise gate is enabled
+    fn is_gate_enabled(&self) -> bool {
+        self.processor.is_gate_enabled()
+    }
 }

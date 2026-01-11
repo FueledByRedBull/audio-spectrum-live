@@ -23,7 +23,7 @@ FILTER_PRESETS = {
     'Voice (300-3400 Hz)': (0.0125, 0.1417, 0.0021),  # 300/24k, 3400/24k, 50 Hz transition
     'Music Bass (20-250 Hz)': (0.0008, 0.0104, 0.0021),  # 20/24k, 250/24k, 50 Hz transition
     'Music Treble (4-16 kHz)': (0.1667, 0.6667, 0.0208),  # 4000/24k, 16000/24k, 500 Hz transition
-    'Narrow Notch (900-1100 Hz)': (0.0375, 0.0458, 0.0021),  # 900/24k, 1100/24k, 50 Hz transition
+    'Narrow Bandpass (900-1100 Hz)': (0.0375, 0.0458, 0.0021),  # 900/24k, 1100/24k, 50 Hz transition
     'Wide Band (100-10 kHz)': (0.0042, 0.4167, 0.0083),  # 100/24k, 10000/24k, 200 Hz transition
     'Part A Spec (0.4π-0.6π)': (0.400, 0.600, 0.050),  # 9.6-14.4 kHz (unchanged - already normalized)
     'Clear Voice Ice (1.5-4 kHz)': (0.0625, 0.1667, 0.0083),  # 1500/24k, 4000/24k, 200 Hz transition
@@ -137,7 +137,7 @@ class FilterPanel(QWidget):
         # FFT size
         self.fft_size_combo = QComboBox()
         self.fft_size_combo.addItems(["512", "1024", "2048", "4096", "8192"])
-        self.fft_size_combo.setCurrentIndex(2)  # Default to 2048
+        self.fft_size_combo.setCurrentIndex(3)  # Default to 4096 for better frequency resolution
         fft_layout.addRow("FFT Size:", self.fft_size_combo)
         
         # Window type for analysis
@@ -148,6 +148,41 @@ class FilterPanel(QWidget):
         
         fft_group.setLayout(fft_layout)
         layout.addWidget(fft_group)
+        
+        # Noise Gate Group
+        gate_group = QGroupBox("Noise Gate")
+        gate_layout = QFormLayout()
+        
+        self.gate_enabled_checkbox = QCheckBox("Enable Noise Gate")
+        self.gate_enabled_checkbox.setToolTip("Reduces gain when signal falls below threshold")
+        gate_layout.addRow("", self.gate_enabled_checkbox)
+        
+        self.gate_threshold_spinbox = QDoubleSpinBox()
+        self.gate_threshold_spinbox.setRange(-80.0, -10.0)
+        self.gate_threshold_spinbox.setSingleStep(1.0)
+        self.gate_threshold_spinbox.setValue(-40.0)
+        self.gate_threshold_spinbox.setSuffix(" dB")
+        self.gate_threshold_spinbox.setToolTip("Signal level below which gate closes")
+        gate_layout.addRow("Threshold:", self.gate_threshold_spinbox)
+        
+        self.gate_attack_spinbox = QDoubleSpinBox()
+        self.gate_attack_spinbox.setRange(1.0, 100.0)
+        self.gate_attack_spinbox.setSingleStep(1.0)
+        self.gate_attack_spinbox.setValue(10.0)
+        self.gate_attack_spinbox.setSuffix(" ms")
+        self.gate_attack_spinbox.setToolTip("Time for gate to open when signal exceeds threshold")
+        gate_layout.addRow("Attack:", self.gate_attack_spinbox)
+        
+        self.gate_release_spinbox = QDoubleSpinBox()
+        self.gate_release_spinbox.setRange(10.0, 1000.0)
+        self.gate_release_spinbox.setSingleStep(10.0)
+        self.gate_release_spinbox.setValue(100.0)
+        self.gate_release_spinbox.setSuffix(" ms")
+        self.gate_release_spinbox.setToolTip("Time for gate to close when signal drops below threshold")
+        gate_layout.addRow("Release:", self.gate_release_spinbox)
+        
+        gate_group.setLayout(gate_layout)
+        layout.addWidget(gate_group)
         
         # Control Buttons
         button_layout = QVBoxLayout()
@@ -194,6 +229,12 @@ class FilterPanel(QWidget):
         # Combo boxes
         self.fft_size_combo.currentTextChanged.connect(self._update_fft_size)
         self.analysis_window_combo.currentTextChanged.connect(self._update_analysis_window)
+        
+        # Noise gate
+        self.gate_enabled_checkbox.toggled.connect(self._update_gate_config)
+        self.gate_threshold_spinbox.valueChanged.connect(self._update_gate_config)
+        self.gate_attack_spinbox.valueChanged.connect(self._update_gate_config)
+        self.gate_release_spinbox.valueChanged.connect(self._update_gate_config)
         
     def _load_preset(self, preset_name):
         """Load filter parameters from preset"""
@@ -340,3 +381,15 @@ class FilterPanel(QWidget):
             self.dsp_controller.set_window_type(window_name)
         except Exception as e:
             print(f"Error updating analysis window: {e}")
+    
+    def _update_gate_config(self):
+        """Update noise gate configuration"""
+        try:
+            enabled = self.gate_enabled_checkbox.isChecked()
+            threshold = self.gate_threshold_spinbox.value()
+            attack = self.gate_attack_spinbox.value()
+            release = self.gate_release_spinbox.value()
+            
+            self.dsp_controller.configure_noise_gate(enabled, threshold, attack, release)
+        except Exception as e:
+            print(f"Error configuring noise gate: {e}")

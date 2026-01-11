@@ -4,6 +4,7 @@ pub mod input;
 pub mod output;
 pub mod buffer;
 pub mod processor;
+pub mod gate;
 
 pub use input::AudioInput;
 pub use output::AudioOutput;

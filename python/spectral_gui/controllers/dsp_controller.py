@@ -154,8 +154,8 @@ class DSPController:
         
         window_enum = window_map.get(window_type, WindowType.Hamming)
         
-        # Update with current FFT size (default 2048)
-        self.processor.update_fft_config(2048, window_enum)
+        # Update with current FFT size (default 4096)
+        self.processor.update_fft_config(4096, window_enum)
         
     def get_waveform_data(self) -> Optional[Dict]:
         """
@@ -229,3 +229,18 @@ class DSPController:
         except Exception as e:
             print(f"Error listing devices: {e}")
             return []
+    
+
+    
+    def configure_noise_gate(self, enabled: bool, threshold_db: float, attack_ms: float, release_ms: float):
+        """
+        Configure noise gate
+        
+        Args:
+            enabled: Enable or disable the noise gate
+            threshold_db: Threshold in dB (e.g., -40.0)
+            attack_ms: Attack time in milliseconds (e.g., 10.0)
+            release_ms: Release time in milliseconds (e.g., 100.0)
+        """
+        if self.processor:
+            self.processor.configure_noise_gate(enabled, threshold_db, attack_ms, release_ms)
